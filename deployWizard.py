@@ -27,6 +27,7 @@ class TestAutomationGUI(tk.Tk):
         self.geometry("800x850")
 
         self.module_entries = {}
+        self.saved_ips = {}
         self.log_queue = queue.Queue()
         self.running_machines = {}
         self.TESTS_CONFIG = {}
@@ -39,6 +40,25 @@ class TestAutomationGUI(tk.Tk):
         self.setup_log_colors()
         self.load_tests_config() # Carga inicial de pruebas
         self.process_log_queue()
+
+    def load_secrets(self):
+        """Carga las credenciales desde secrets.json si existe."""
+        secrets_path = os.path.join(os.path.dirname(__file__), "secrets.json")
+        if os.path.exists(secrets_path):
+            try:
+                with open(secrets_path, "r") as f:
+                    secrets = json.load(f)
+                    self.github_user_entry.delete(0, tk.END)
+                    self.github_user_entry.insert(0, secrets.get("github_user", ""))
+                    self.github_token_entry.delete(0, tk.END)
+                    self.github_token_entry.insert(0, secrets.get("github_token", ""))
+                    self.ssh_user_entry.delete(0, tk.END)
+                    self.ssh_user_entry.insert(0, secrets.get("ssh_user", ""))
+                    self.ssh_password_entry.delete(0, tk.END)
+                    self.ssh_password_entry.insert(0, secrets.get("ssh_password", ""))
+
+            except Exception as e:
+                self.log_to_console(f"Error al cargar secrets.json: {e}", level="error")
 
     def create_widgets(self):
         """Crea todos los widgets de la interfaz gráfica."""
@@ -114,6 +134,7 @@ class TestAutomationGUI(tk.Tk):
         
         self.log_console_widget = scrolledtext.ScrolledText(log_frame, wrap=tk.WORD, state="disabled", bg="black", fg="white", font=("monospace", 9))
         self.log_console_widget.pack(fill=tk.BOTH, expand=True)
+        self.load_secrets()
     
     def setup_log_colors(self):
         """Define los tags de color para la consola."""
@@ -146,6 +167,11 @@ class TestAutomationGUI(tk.Tk):
 
     def on_test_select(self, event=None):
         """Genera los campos de entrada para IPs y parámetros basado en la prueba seleccionada."""
+        for module_name, entry_dict in self.module_entries.items():
+            ip = entry_dict['ip'].get()
+            if ip:
+                self.saved_ips[module_name] = ip
+
         for widget in self.modules_frame.winfo_children():
             widget.destroy()
         self.module_entries.clear()
@@ -159,11 +185,19 @@ class TestAutomationGUI(tk.Tk):
         row_counter = 0
         for module, count in modules.items():
             for i in range(1, count + 1):
-                module_instance_name = f"{module}" if count == 1 else f"{module}{i}"
+                if (module == "cpu" or module == "io") and count == 1:
+                    module_instance_name = f"{module}1"
+                else:
+                    module_instance_name = f"{module}" if count == 1 else f"{module}{i}"
                 
                 ttk.Label(self.modules_frame, text=f"IP para {module_instance_name}:").grid(row=row_counter, column=0, padx=5, pady=2, sticky="w")
                 ip_entry = ttk.Entry(self.modules_frame, width=30)
                 ip_entry.grid(row=row_counter, column=1, padx=5, pady=2, sticky="ew")
+                self.module_entries[module_instance_name] = {'ip': ip_entry}
+
+                # Restaura la IP si existe
+                if module_instance_name in self.saved_ips:
+                    ip_entry.insert(0, self.saved_ips[module_instance_name])
                 self.module_entries[module_instance_name] = {'ip': ip_entry}
 
                 if module == "io":
