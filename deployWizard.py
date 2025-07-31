@@ -16,6 +16,7 @@ CONFIGS_BASE_PATH = "configs"  # Ruta local a la carpeta que contiene las config
 TEST_CONFIG_FILE = "pruebas.json" # Archivo de configuración de pruebas
 PRUEBAS_REPO_URL = "https://github.com/sisoputnfrba/revenge-of-the-cth-pruebas" # Repositorio con pseudocódigos
 PRUEBAS_REPO_PATH = "/home/utnso/revenge-of-the-cth-pruebas" # Directorio de destino para el repo de pruebas
+COMMONS_REPO_URL = "https://github.com/sisoputnfrba/so-commons-library"
 
 class TestAutomationGUI(tk.Tk):
     """
@@ -310,6 +311,17 @@ class TestAutomationGUI(tk.Tk):
                 if not self._execute_remote_command(ssh, f"mkdir -p {build_dir}"): return False
                 if not self._execute_remote_command(ssh, f"git clone {repo_url} {build_dir}/{PROJECT_DIR_NAME}"): return False
 
+                # Instalar so-commons-library
+                self.log_to_console("\n2b. Clonando e instalando so-commons-library...")
+                commons_dir = f"{build_dir}/so-commons-library"
+                if not self._execute_remote_command(ssh, f"mkdir -p {build_dir}"): return False
+                if not self._execute_remote_command(ssh, f"git clone {COMMONS_REPO_URL} {commons_dir}"): return False
+                # Ejecutar make install pasando la contraseña al sudo
+                self.log_to_console("  > Ejecutando make install con sudo y contraseña...")
+                ssh_password = ssh_info['password']
+                install_cmd = f"cd {commons_dir} && echo '{ssh_password}' | sudo -S make install"
+                if not self._execute_remote_command(ssh, install_cmd): return False
+
                 self.log_to_console("\n3. Compilando el módulo...")
                 compile_command = f"cd {build_dir}/{PROJECT_DIR_NAME}/{base_module_name}/ && make clean all"
                 if not self._execute_remote_command(ssh, compile_command): return False
@@ -369,7 +381,7 @@ class TestAutomationGUI(tk.Tk):
                 with paramiko.SSHClient() as ssh:
                     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
                     ssh.connect(ip, username=username, password=password, timeout=10)
-                    self._execute_remote_command(ssh, f"rm -rf {build_dir}")
+                    self._execute_remote_command(ssh, f"echo '{ssh_password}' | sudo -S rm -rf {build_dir}")
             except Exception as e:
                 self.log_to_console(f"  > Advertencia: No se pudo limpiar el directorio temporal {build_dir}. Error: {e}", level="warning")
 
