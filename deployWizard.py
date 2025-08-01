@@ -7,6 +7,7 @@ import queue
 import uuid
 import re
 import json
+import time
 
 # --- CONFIGURACIÓN ---
 # ¡IMPORTANTE! Modifica estas variables según tu proyecto.
@@ -26,6 +27,14 @@ class TestAutomationGUI(tk.Tk):
         super().__init__()
         self.title("Automatizador de Pruebas v3.11")
         self.geometry("800x850")
+        self.minsize(600, 500)  # Tamaño mínimo de la ventana
+        
+        # Hacer la ventana redimensionable
+        self.resizable(True, True)
+        
+        # Configurar el grid para que se expanda
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(0, weight=1)
 
         self.module_entries = {}
         self.saved_ips = {}
@@ -67,14 +76,55 @@ class TestAutomationGUI(tk.Tk):
         main_frame.pack(fill=tk.BOTH, expand=True)
         
         # --- Frame superior para toda la configuración ---
-        # Usaremos un scrolledtext como contenedor para tener scroll
-        settings_container = scrolledtext.ScrolledText(main_frame, wrap=tk.NONE)
+        # Crear un frame con canvas y scrollbar para el contenido scrolleable
+        settings_container = ttk.Frame(main_frame)
         settings_container.pack(fill=tk.BOTH, expand=True, side=tk.TOP)
-        settings_container.vbar.config(width=0) # Ocultar scrollbar por defecto si no es necesaria
-
-        # Frame interno para el contenido
-        scrollable_frame = ttk.Frame(settings_container)
-        settings_container.window_create(tk.END, window=scrollable_frame)
+        
+        # Canvas para scroll
+        canvas = tk.Canvas(settings_container)
+        scrollbar = ttk.Scrollbar(settings_container, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Configurar scroll con rueda del mouse
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        def _bind_to_mousewheel(event):
+            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        
+        def _unbind_from_mousewheel(event):
+            canvas.unbind_all("<MouseWheel>")
+        
+        canvas.bind('<Enter>', _bind_to_mousewheel)
+        canvas.bind('<Leave>', _unbind_from_mousewheel)
+        
+        # Configurar el ancho del frame interno para que coincida con el canvas
+        def configure_scroll_region(event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            canvas_width = canvas.winfo_width()
+            if canvas_width > 1:  # Solo configurar si el canvas tiene un ancho válido
+                window_items = canvas.find_all()
+                if window_items:  # Solo configurar si hay elementos en el canvas
+                    canvas.itemconfig(window_items[0], width=canvas_width - 4)  # -4 para margen
+        
+        canvas.bind('<Configure>', configure_scroll_region)
+        
+        # También vincular el evento de redimensionamiento del frame scrollable
+        def on_frame_configure(event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+        
+        scrollable_frame.bind('<Configure>', on_frame_configure)
 
 
         # --- Contenido dentro del frame con scroll ---
@@ -304,8 +354,20 @@ class TestAutomationGUI(tk.Tk):
                 ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
                 ssh.connect(ip, username=username, password=password, timeout=10)
 
-                self.log_to_console("1. Deteniendo sesión de screen anterior (si existe)...")
-                self._execute_remote_command(ssh, f"screen -S {module_instance_name} -X quit")
+                self.log_to_console("1. Verificando sesión de screen existente...")
+                # Verificar si ya existe una sesión con este nombre
+                check_session_cmd = f"screen -list | grep -q '{module_instance_name}'"
+                _, stdout, stderr = ssh.exec_command(check_session_cmd, timeout=30)
+                session_exists = stdout.channel.recv_exit_status() == 0
+                
+                if session_exists:
+                    self.log_to_console(f"  > Sesión '{module_instance_name}' ya existe, reutilizando...")
+                    # Limpiar procesos en la sesión existente
+                    self._execute_remote_command(ssh, f"screen -S {module_instance_name} -p 0 -X stuff $'\\003'")
+                    time.sleep(1)
+                    self._execute_remote_command(ssh, f"screen -S {module_instance_name} -p 0 -X stuff $'clear\\n'")
+                else:
+                    self.log_to_console(f"  > No existe sesión '{module_instance_name}', se creará una nueva...")
 
                 self.log_to_console(f"\n2. Clonando repositorio en directorio temporal: {build_dir}")
                 if not self._execute_remote_command(ssh, f"mkdir -p {build_dir}"): return False
@@ -360,10 +422,16 @@ class TestAutomationGUI(tk.Tk):
 
                 command_to_paste = f"./{executable_name} {params}".strip()
                 
-                start_cmd = f"cd {persistent_run_dir}; exec bash"
-                screen_start_cmd = f"screen -dmS {module_instance_name} bash -c '{start_cmd}'"
-                if not self._execute_remote_command(ssh, screen_start_cmd):
-                    return False
+                # Solo crear nueva sesión si no existe
+                if not session_exists:
+                    start_cmd = f"cd {persistent_run_dir}; exec bash"
+                    screen_start_cmd = f"screen -dmS {module_instance_name} bash -c '{start_cmd}'"
+                    if not self._execute_remote_command(ssh, screen_start_cmd):
+                        return False
+                    time.sleep(1)  # Esperar a que la sesión se inicie
+                else:
+                    # Cambiar al directorio correcto en la sesión existente
+                    self._execute_remote_command(ssh, f"screen -S {module_instance_name} -p 0 -X stuff 'cd {persistent_run_dir}\\n'")
 
                 screen_paste_cmd = f"screen -S {module_instance_name} -X stuff '{command_to_paste}'"
                 if not self._execute_remote_command(ssh, screen_paste_cmd):
@@ -381,7 +449,7 @@ class TestAutomationGUI(tk.Tk):
                 with paramiko.SSHClient() as ssh:
                     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
                     ssh.connect(ip, username=username, password=password, timeout=10)
-                    self._execute_remote_command(ssh, f"echo '{ssh_password}' | sudo -S rm -rf {build_dir}")
+                    self._execute_remote_command(ssh, f"echo '{password}' | sudo -S rm -rf {build_dir}")
             except Exception as e:
                 self.log_to_console(f"  > Advertencia: No se pudo limpiar el directorio temporal {build_dir}. Error: {e}", level="warning")
 
@@ -453,17 +521,30 @@ class TestAutomationGUI(tk.Tk):
         self.run_button.config(state="normal")
 
     def stop_module(self, ssh_info, module_instance_name):
-        """Envía una señal SIGINT a una sesión de screen en una máquina remota."""
+        """Envía 2 Ctrl+C consecutivos a la sesión de screen sin cerrarla."""
         ip, username, password = ssh_info['ip'], ssh_info['username'], ssh_info['password']
-        self.log_to_console(f"Enviando señal de detención a '{module_instance_name}' en {ip}...")
+        self.log_to_console(f"Enviando señales de interrupción a '{module_instance_name}' en {ip}...")
         try:
             with paramiko.SSHClient() as ssh:
                 ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
                 ssh.connect(ip, username=username, password=password, timeout=10)
-                stop_command = f"screen -S {module_instance_name} -p 0 -X stuff $'\\C-c'"
-                self._execute_remote_command(ssh, stop_command)
+                
+                # Enviar primer Ctrl+C
+                self.log_to_console(f"  > Enviando primer Ctrl+C a la sesión de screen '{module_instance_name}'...")
+                ctrl_c_command1 = f"screen -S {module_instance_name} -p 0 -X stuff $'\\003'"
+                self._execute_remote_command(ssh, ctrl_c_command1)
+                
+                # Esperar un poco y enviar segundo Ctrl+C
+                time.sleep(1)
+                
+                self.log_to_console(f"  > Enviando segundo Ctrl+C a la sesión de screen '{module_instance_name}'...")
+                ctrl_c_command2 = f"screen -S {module_instance_name} -p 0 -X stuff $'\\003'"
+                self._execute_remote_command(ssh, ctrl_c_command2)
+                
+                self.log_to_console(f"  > Señales enviadas. La sesión de screen '{module_instance_name}' permanece activa.", level="success")
+                
         except Exception as e:
-            self.log_to_console(f"Error al detener {module_instance_name} en {ip}: {e}", level="error")
+            self.log_to_console(f"Error al enviar señales a {module_instance_name} en {ip}: {e}", level="error")
 
     def strip_ansi_codes(self, text):
         """Removes ANSI escape codes from a string."""
