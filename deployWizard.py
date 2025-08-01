@@ -25,7 +25,7 @@ class TestAutomationGUI(tk.Tk):
     """
     def __init__(self):
         super().__init__()
-        self.title("Automatizador de Pruebas v3.11")
+        self.title("Automatizador de Pruebas v3.14")
         self.geometry("800x850")
         self.minsize(600, 500)  # Tamaño mínimo de la ventana
         
@@ -69,6 +69,49 @@ class TestAutomationGUI(tk.Tk):
 
             except Exception as e:
                 self.log_to_console(f"Error al cargar secrets.json: {e}", level="error")
+
+    def load_ips(self):
+        """Carga las IPs desde ips.json si existe."""
+        ips_path = os.path.join(os.path.dirname(__file__), "ips.json")
+        if os.path.exists(ips_path):
+            try:
+                with open(ips_path, "r") as f:
+                    ips = json.load(f)
+                    # Actualizar las IPs guardadas
+                    self.saved_ips.update(ips)
+                    # Si hay campos de entrada activos, actualizarlos
+                    for module_name, entry_dict in self.module_entries.items():
+                        if module_name in ips:
+                            entry_dict['ip'].delete(0, tk.END)
+                            entry_dict['ip'].insert(0, ips[module_name])
+                    self.log_to_console(f"IPs cargadas desde ips.json", level="success")
+            except Exception as e:
+                self.log_to_console(f"Error al cargar ips.json: {e}", level="error")
+        else:
+            self.log_to_console("Archivo ips.json no encontrado", level="warning")
+
+    def save_ips(self):
+        """Guarda las IPs actuales en ips.json."""
+        try:
+            # Recopilar IPs actuales de los campos de entrada
+            current_ips = {}
+            for module_name, entry_dict in self.module_entries.items():
+                ip = entry_dict['ip'].get().strip()
+                if ip:
+                    current_ips[module_name] = ip
+            
+            # También incluir las IPs guardadas que no están en los campos actuales
+            for module_name, ip in self.saved_ips.items():
+                if module_name not in current_ips and ip:
+                    current_ips[module_name] = ip
+            
+            ips_path = os.path.join(os.path.dirname(__file__), "ips.json")
+            with open(ips_path, "w") as f:
+                json.dump(current_ips, f, indent=2)
+            
+            self.log_to_console(f"IPs guardadas en ips.json", level="success")
+        except Exception as e:
+            self.log_to_console(f"Error al guardar ips.json: {e}", level="error")
 
     def create_widgets(self):
         """Crea todos los widgets de la interfaz gráfica."""
@@ -165,6 +208,18 @@ class TestAutomationGUI(tk.Tk):
         self.reload_button = ttk.Button(selector_frame, text="Recargar Pruebas", command=self.load_tests_config)
         self.reload_button.grid(row=0, column=1, padx=(10, 0), pady=5)
 
+        # Frame para botones de IPs
+        ips_buttons_frame = ttk.Frame(test_selection_frame)
+        ips_buttons_frame.pack(fill=tk.X, pady=5)
+        ips_buttons_frame.columnconfigure(0, weight=1)
+        ips_buttons_frame.columnconfigure(1, weight=1)
+
+        self.load_ips_button = ttk.Button(ips_buttons_frame, text="Cargar IPs", command=self.load_ips)
+        self.load_ips_button.grid(row=0, column=0, sticky="ew", padx=(0, 5))
+
+        self.save_ips_button = ttk.Button(ips_buttons_frame, text="Guardar IPs", command=self.save_ips)
+        self.save_ips_button.grid(row=0, column=1, sticky="ew", padx=(5, 0))
+
         self.modules_frame = ttk.Frame(test_selection_frame, padding="5")
         self.modules_frame.pack(fill=tk.X, pady=5)
 
@@ -186,6 +241,7 @@ class TestAutomationGUI(tk.Tk):
         self.log_console_widget = scrolledtext.ScrolledText(log_frame, wrap=tk.WORD, state="disabled", bg="black", fg="white", font=("monospace", 9))
         self.log_console_widget.pack(fill=tk.BOTH, expand=True)
         self.load_secrets()
+        self.load_ips()  # Cargar IPs al inicio
     
     def setup_log_colors(self):
         """Define los tags de color para la consola."""
@@ -203,18 +259,34 @@ class TestAutomationGUI(tk.Tk):
                 self.TESTS_CONFIG = json.load(f)
             self.test_selector['values'] = list(self.TESTS_CONFIG.keys())
             self.test_var.set("") # Limpiar selección
-            for widget in self.modules_frame.winfo_children():
-                widget.destroy()
-            self.module_entries.clear()
+            
+            # Si hay pruebas disponibles, seleccionar la primera y mostrar los campos
+            if self.TESTS_CONFIG:
+                self.test_selector.current(0)
+                # Disparar manualmente el evento para mostrar los campos
+                self.on_test_select()
+            else:
+                for widget in self.modules_frame.winfo_children():
+                    widget.destroy()
+                self.module_entries.clear()
+            
             self.log_to_console(f"Configuración de pruebas cargada/recargada desde '{TEST_CONFIG_FILE}'.", level="success")
         except FileNotFoundError:
             self.log_to_console(f"Error: No se encontró el archivo '{TEST_CONFIG_FILE}'.", level="error")
             self.TESTS_CONFIG = {}
             self.test_selector['values'] = []
+            # Limpiar campos si no hay configuración
+            for widget in self.modules_frame.winfo_children():
+                widget.destroy()
+            self.module_entries.clear()
         except json.JSONDecodeError:
             self.log_to_console(f"Error: El archivo '{TEST_CONFIG_FILE}' tiene un formato JSON inválido.", level="error")
             self.TESTS_CONFIG = {}
             self.test_selector['values'] = []
+            # Limpiar campos si hay error en JSON
+            for widget in self.modules_frame.winfo_children():
+                widget.destroy()
+            self.module_entries.clear()
 
     def on_test_select(self, event=None):
         """Genera los campos de entrada para IPs y parámetros basado en la prueba seleccionada."""
