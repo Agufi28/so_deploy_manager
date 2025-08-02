@@ -6,7 +6,7 @@
       "cpu": 2,
       "io": 2
     },
-    "config_folder": "PLANI_CORTO_PLAZO",
+    "config_folder": "PLANI_CORTO_PLAZO_FIFO",
     "pseudocode_file": "PLANI_CORTO_PLAZO",
     "tamanio_proceso": 0
   },
@@ -17,7 +17,7 @@
       "cpu": 1,
       "io": 1
     },
-    "config_folder": "PLANI_CORTO_PLAZO",
+    "config_folder": "PLANI_CORTO_PLAZO_SJF",
     "pseudocode_file": "PLANI_CORTO_PLAZO",
     "tamanio_proceso": 0
   },
@@ -28,7 +28,7 @@
       "cpu": 1,
       "io": 1
     },
-    "config_folder": "PLANI_CORTO_PLAZO",
+    "config_folder": "PLANI_CORTO_PLAZO_SRT",
     "pseudocode_file": "PLANI_CORTO_PLAZO",
     "tamanio_proceso": 0
   },
@@ -39,7 +39,7 @@
       "cpu": 1,
       "io": 1
     },
-    "config_folder": "PLANI_LYM_PLAZO",
+    "config_folder": "PLANI_LYM_PLAZO_FIFO",
     "pseudocode_file": "PLANI_LYM_PLAZO",
     "tamanio_proceso": 0
   },
@@ -50,7 +50,7 @@
       "cpu": 1,
       "io": 1
     },
-    "config_folder": "PLANI_LYM_PLAZO",
+    "config_folder": "PLANI_LYM_PLAZO_PMCP",
     "pseudocode_file": "PLANI_LYM_PLAZO",
     "tamanio_proceso": 0
   },
@@ -65,25 +65,47 @@
     "pseudocode_file": "MEMORIA_IO",
     "tamanio_proceso": 90
   },
-  "Memoria - Cache": {
+  "Memoria - Cache (CLOCK)": {
     "modules": {
       "kernel": 1,
       "memoria": 1,
       "cpu": 1,
       "io": 1
     },
-    "config_folder": "MEMORIA_BASE",
+    "config_folder": "MEMORIA_BASE_CLOCK",
     "pseudocode_file": "MEMORIA_BASE",
     "tamanio_proceso": 256
   },
-  "Memoria - TLB": {
+  "Memoria - Cache (CLOCK-M)": {
     "modules": {
       "kernel": 1,
       "memoria": 1,
       "cpu": 1,
       "io": 1
     },
-    "config_folder": "MEMORIA_BASE_TLB",
+    "config_folder": "MEMORIA_BASE_CLOCK-M",
+    "pseudocode_file": "MEMORIA_BASE",
+    "tamanio_proceso": 256
+  },
+  "Memoria - TLB (FIFO)": {
+    "modules": {
+      "kernel": 1,
+      "memoria": 1,
+      "cpu": 1,
+      "io": 1
+    },
+    "config_folder": "MEMORIA_BASE_TLB_FIFO",
+    "pseudocode_file": "MEMORIA_BASE_TLB",
+    "tamanio_proceso": 256
+  },
+  "Memoria - TLB (LRU)": {
+    "modules": {
+      "kernel": 1,
+      "memoria": 1,
+      "cpu": 1,
+      "io": 1
+    },
+    "config_folder": "MEMORIA_BASE_TLB_LRU",
     "pseudocode_file": "MEMORIA_BASE_TLB",
     "tamanio_proceso": 256
   },
