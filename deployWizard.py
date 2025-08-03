@@ -37,7 +37,7 @@ class TestAutomationGUI(tk.Tk):
         self.rowconfigure(0, weight=1)
 
         self.module_entries = {}
-        self.saved_ips = {}
+        self.saved_ips = {"kernel":"192.168.0.33","memoria":"192.168.0.33","cpu1":"192.168.0.33", "io1":"192.168.0.33"}
         self.log_queue = queue.Queue()
         self.running_machines = {}
         self.TESTS_CONFIG = {}
@@ -415,11 +415,13 @@ class TestAutomationGUI(tk.Tk):
         self.run_button.config(state="normal")
 
     def setup_and_run_module(self, ssh_info, base_module_name, module_instance_name, test_config, repo_url, ip_map):
-        """Se conecta, clona, compila, configura y prepara un módulo para su ejecución."""
+        """Se conecta, actualiza el repositorio, compila, configura y prepara un módulo para su ejecución."""
         ip, username, password = ssh_info['ip'], ssh_info['username'], ssh_info['password']
         self.log_to_console(f"\n--- Configurando módulo '{module_instance_name}' en {ip} ---", level="title")
         
-        build_dir = f"/tmp/build-{uuid.uuid4()}"
+        # Usar directorio persistente para el build
+        build_dir = f"/tmp/build-persistent"
+        project_dir = f"{build_dir}/{PROJECT_DIR_NAME}"
         
         try:
             with paramiko.SSHClient() as ssh:
@@ -441,23 +443,54 @@ class TestAutomationGUI(tk.Tk):
                 else:
                     self.log_to_console(f"  > No existe sesión '{module_instance_name}', se creará una nueva...")
 
-                self.log_to_console(f"\n2. Clonando repositorio en directorio temporal: {build_dir}")
+                # Verificar si el repositorio ya existe y actualizarlo
+                self.log_to_console(f"\n2. Actualizando repositorio del proyecto...")
                 if not self._execute_remote_command(ssh, f"mkdir -p {build_dir}"): return False
-                if not self._execute_remote_command(ssh, f"git clone {repo_url} {build_dir}/{PROJECT_DIR_NAME}"): return False
+                
+                # Verificar si el proyecto ya existe
+                check_project_cmd = f"test -d {project_dir}/.git"
+                _, stdout, stderr = ssh.exec_command(check_project_cmd, timeout=30)
+                project_exists = stdout.channel.recv_exit_status() == 0
+                
+                if project_exists:
+                    self.log_to_console(f"  > Repositorio existe, actualizando con git pull...")
+                    if not self._execute_remote_command(ssh, f"cd {project_dir} && git pull origin develop"): return False
+                else:
+                    self.log_to_console(f"  > Repositorio no existe, clonando por primera vez...")
+                    if not self._execute_remote_command(ssh, f"git clone {repo_url} {project_dir}"): return False
 
-                # Instalar so-commons-library
-                self.log_to_console("\n2b. Clonando e instalando so-commons-library...")
-                commons_dir = f"{build_dir}/so-commons-library"
-                if not self._execute_remote_command(ssh, f"mkdir -p {build_dir}"): return False
-                if not self._execute_remote_command(ssh, f"git clone {COMMONS_REPO_URL} {commons_dir}"): return False
-                # Ejecutar make install pasando la contraseña al sudo
-                self.log_to_console("  > Ejecutando make install con sudo y contraseña...")
-                ssh_password = ssh_info['password']
-                install_cmd = f"cd {commons_dir} && echo '{ssh_password}' | sudo -S make install"
-                if not self._execute_remote_command(ssh, install_cmd): return False
+                # Verificar si so-commons-library ya está instalada en el sistema
+                self.log_to_console("\n2b. Verificando so-commons-library...")
+                check_commons_installed_cmd = "test -f /usr/lib/libcommons.so && test -d /usr/include/commons"
+                _, stdout, stderr = ssh.exec_command(check_commons_installed_cmd, timeout=30)
+                commons_installed = stdout.channel.recv_exit_status() == 0
+                
+                if commons_installed:
+                    self.log_to_console("  > so-commons-library ya está instalada en el sistema, omitiendo instalación...")
+                else:
+                    self.log_to_console("  > so-commons-library no está instalada, procediendo con instalación...")
+                    commons_dir = f"{build_dir}/so-commons-library"
+                    
+                    # Verificar si so-commons-library ya existe en el directorio local
+                    check_commons_cmd = f"test -d {commons_dir}/.git"
+                    _, stdout, stderr = ssh.exec_command(check_commons_cmd, timeout=30)
+                    commons_exists = stdout.channel.recv_exit_status() == 0
+                    
+                    if commons_exists:
+                        self.log_to_console("  > Repositorio so-commons-library existe, actualizando...")
+                        if not self._execute_remote_command(ssh, f"cd {commons_dir} && git pull origin master"): return False
+                    else:
+                        self.log_to_console("  > Clonando so-commons-library...")
+                        if not self._execute_remote_command(ssh, f"git clone {COMMONS_REPO_URL} {commons_dir}"): return False
+                    
+                    # Ejecutar make install pasando la contraseña al sudo
+                    self.log_to_console("  > Ejecutando make install con sudo y contraseña...")
+                    ssh_password = ssh_info['password']
+                    install_cmd = f"cd {commons_dir} && echo '{ssh_password}' | sudo -S make install"
+                    if not self._execute_remote_command(ssh, install_cmd): return False
 
                 self.log_to_console("\n3. Compilando el módulo...")
-                compile_command = f"cd {build_dir}/{PROJECT_DIR_NAME}/{base_module_name}/ && make clean all"
+                compile_command = f"cd {project_dir}/{base_module_name}/ && git checkout develop && make clean all"
                 if not self._execute_remote_command(ssh, compile_command): return False
                 
                 self.log_to_console("\n4. Creando directorio de ejecución persistente...")
@@ -465,7 +498,7 @@ class TestAutomationGUI(tk.Tk):
                 if not self._execute_remote_command(ssh, f"mkdir -p {persistent_run_dir}"): return False
 
                 self.log_to_console("\n5. Copiando archivos de ejecución y configuración...")
-                source_executable = f"{build_dir}/{PROJECT_DIR_NAME}/{base_module_name}/bin/{base_module_name.lower()}"
+                source_executable = f"{project_dir}/{base_module_name}/bin/{base_module_name.lower()}"
                 if not self._execute_remote_command(ssh, f"cp {source_executable} {persistent_run_dir}/"): return False
                 
                 if not self._process_and_upload_config(ssh, test_config, base_module_name, module_instance_name, persistent_run_dir, ip_map):
@@ -515,15 +548,6 @@ class TestAutomationGUI(tk.Tk):
         except Exception as e:
             self.log_to_console(f"Ocurrió un error al configurar {ip}: {e}", level="error")
             return False
-        finally:
-            self.log_to_console(f"\n7. Limpiando directorio de compilación {build_dir}...")
-            try:
-                with paramiko.SSHClient() as ssh:
-                    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                    ssh.connect(ip, username=username, password=password, timeout=10)
-                    self._execute_remote_command(ssh, f"echo '{password}' | sudo -S rm -rf {build_dir}")
-            except Exception as e:
-                self.log_to_console(f"  > Advertencia: No se pudo limpiar el directorio temporal {build_dir}. Error: {e}", level="warning")
 
     def _process_and_upload_config(self, ssh, test_config, base_module_name, module_instance_name, remote_dir, ip_map):
         """Encuentra, procesa (reemplaza IPs) y sube el archivo de configuración correcto."""
